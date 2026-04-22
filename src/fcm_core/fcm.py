@@ -1,3 +1,10 @@
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+from typing import List
+from pathlib import Path
+from FlowCytometryTools import FCMeasurement
+
 #%%
 def compile_fcs_data(
     data_folder="data", 
@@ -7,7 +14,8 @@ def compile_fcs_data(
     exclude_keywords=None
 ):
     """
-    Compiles FCS experiment data from subfolders into a single pandas DataFrame.
+    Compiles FCS experiment data from subfolders into a single pandas 
+    DataFrame.
     
     Parameters:
     - data_folder (str): Name of the folder containing the data.
@@ -18,10 +26,7 @@ def compile_fcs_data(
     - exclude_keywords (list): Skip files containing ANY of these strings in 
                                the name.
     """
-    import pandas as pd
-    from pathlib import Path
-    from FlowCytometryTools import FCMeasurement
-
+   
     # Standardize inputs: Convert single strings to lists
     if isinstance(include_keywords, str):
         include_keywords = [include_keywords]
@@ -218,13 +223,28 @@ def sample_size_normalizer(df, samples_col:str, target_size:int, col:str):
 class Graph:
     """
     A class to generate and customize Flow Cytometry (FCM) histograms.
-    """
-    # Import the packages inside the class to avoid unnecessary imports when 
-    # the class is not used.
-    import numpy as np
-    import plotly.graph_objects as go
-    from typing import List
 
+    Attributes:
+        bins (np.array): The bin edges for the histogram.
+        width (int): Width of the plot in pixels.
+        height (int): Height of the plot in pixels.
+        plot_bgcolor (str): Background color of the plot.
+        x_title (str): Title for the x-axis.
+        y_title (str): Title for the y-axis.
+        title_font_size (int): Font size for the plot title.
+        tick_font_size (int): Font size for the axis ticks.
+        border_width (int): Width of the plot borders.
+        border_color (str): Color of the plot borders.
+        show_line (bool): Whether to show the axis lines.
+        mirror_axes (bool): Whether to mirror the axis lines on all sides.
+        ticks_style (str): Style of the axis ticks (e.g., 'outside', 'inside', 'none').
+        tick0 (int): Starting point for the y-axis ticks.
+        dtick (int): Step size for the y-axis ticks.
+        minor_dtick (int): Step size for the minor ticks on the y-axis.
+        line_colors (List[str]): List of colors for the histogram lines.
+        fill_colors (List[str]): List of colors for the histogram fills.
+    """
+ 
     def __init__(self, 
                  df, 
                  samples= List[str], 
@@ -232,6 +252,22 @@ class Graph:
                  date=None,
                  channel="Size_normalized_PKH26"):
         
+        """
+        Args:
+            df (pd.DataFrame): The input dataframe containing FCM data.
+            samples (List[str]): List of sample names to include in the graph.
+            incub_duration (str, optional): Incubation duration to filter 
+                the data.
+            date (str, optional): Date/Experiment ID to filter the data.
+            channel (str): The column name in the dataframe to be plotted on 
+                the x-axis.
+
+        Raises:
+            ValueError: If the 'samples' list is empty, or if any of the 
+                provided 'samples', 'incub_duration', or 'date' values are not 
+                present in the dataframe's respective columns.
+        """
+
         # Check the samples are defined
         if not samples: 
             raise ValueError("The 'samples' list cannot be empty. " \
@@ -321,6 +357,13 @@ class Graph:
     def set_layout(self, **kwargs):
         """
         Utility method to quickly update multiple layout attributes at once.
+       
+        Args:
+            **kwargs: Any layout attribute of the Graph class that you want to 
+                      update. For example, width, height, plot_bgcolor, etc.
+        Returns:
+            None
+
         Example: graph.set_layout(
                     width=800, 
                     height=600, 
@@ -337,6 +380,13 @@ class Graph:
         """
         Filters the dataframe, builds the Plotly figures based on current 
         attributes, and displays/saves them.
+        
+        Args:
+            save_fig (bool): Whether to save the figure as an SVG file.
+            save_path (str): The directory path where the figure should be 
+                saved. If None, the figure will not be saved.
+        Returns:
+            None
         """
 
         selected_samples = "|".join(self.samples)
