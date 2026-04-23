@@ -201,7 +201,7 @@ def sample_size_normalizer(df: pd.DataFrame, samples_col: str,
         a new column that is the normalized value of the given column based on 
         the sample size normalization factor.
     """
-    
+
     final_list = []
     for sample in df[samples_col].unique():
         # Select the sample
@@ -492,3 +492,32 @@ class Graph:
                     )
 
             fig.show()
+
+
+#%%
+def get_sample_lengths(df: pd.DataFrame, *sample_names: str) -> None:
+    """
+    Show the sample count per experiment for any number of sample names.
+    
+    Args:
+        df: The DataFrame containing the data.
+        *sample_names: The names of the samples for which to display counts.
+
+    Returns:
+        None: This function prints the resulting DataFrame and does not 
+            return anything.
+    """
+    length_dict = {"Experiment": []}
+    for name in sample_names:
+        length_dict[f"length_of_{name.lower()}"] = []
+
+    for exp in df["Experimental_ID"].unique():
+        data = df.loc[df["Experimental_ID"] == exp]
+        length_dict["Experiment"].append(exp)
+        for name in sample_names:
+            length_dict[f"length_of_{name.lower()}"].append(
+                len(data.loc[data["Sample"] == name])
+            )
+
+    df_length = pd.DataFrame(data=length_dict)
+    print(df_length.to_string(index=False))
