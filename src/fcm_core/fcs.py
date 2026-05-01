@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import plotly.express as px
 from plotly.subplots import make_subplots
 
 
@@ -290,4 +291,124 @@ def fcs_time_scatter_plot(
         height=1800,
         width=600,
     )
+    return fig
+
+def fcs_high_low_ratio_lineplot(
+    df: pd.DataFrame,
+    signal_col: str = "PKH26",
+    low_sample: str = "Low",
+    high_sample: str = "High",
+    exlude_sample: str = "Dye",
+    first_ratio_zero: bool = True,
+    on_graph_text: bool = False,
+) -> go.Figure:
+    """Plot the High-to-Low uptake median ratio as a line graph over time.
+
+    Computes per-experiment medians of ``signal_col`` for each sample group,
+    derives the High/Low ratio at each time point, and returns a styled
+    Plotly line figure.
+
+    Args:
+        df: Normalized dataframe containing all events. Must have columns
+            ``Experimental_ID``, ``Sample``, ``File name``,
+            ``Date_of_experiment``, ``Days``, and ``signal_col``.
+        signal_col: Fluorescence channel column used for median computation.
+            Defaults to ``"PKH26"``.
+        low_sample: Label of the low-uptake sample group. Defaults to
+            ``"Low"``.
+        high_sample: Label of the high-uptake sample group. Defaults to
+            ``"High"``.
+        exlude_sample: Substring to exclude the unneeded samples 
+            (e.g., Dye control) from analysis.
+        first_ratio_zero: If ``True``, sets the ratio of the first time
+            point to zero (representing the initial sort). Defaults to
+            ``True``.
+        on_graph_text: If ``True``, annotates each data point with its
+            ``Date_of_experiment`` label. Defaults to ``False``.
+
+    Returns:
+        go.Figure: Plotly line figure with one point per experiment.
+    """
+    df = df.copy()
+    df["cell_count"] = 1
+
+    medians = df.groupby(
+        by=[
+            "Experimental_ID", "Sample", "File name", 
+            "Date_of_experiment", "Days"
+        ]
+    ).agg({signal_col: "median", "cell_count": "sum"}).reset_index()
+    medians.rename(columns={"cell_count": "cell_count"}, inplace=True)
+
+    medians = medians.loc[~medians["Sample"].str.contains(exlude_sample)]
+    medians.sort_values(by="Experimental_ID", inplace=True)
+
+    ratio_label = f"{high_sample}/{low_sample} ratio"
+    ratio_col = f"{signal_col}_ratio"
+
+    all_medians = []
+    for exp in medians["Experimental_ID"].unique():
+        data = medians.loc[medians["Experimental_ID"] == exp]
+        row_low = data.loc[data["Sample"] == low_sample]
+        row_high = data.loc[data["Sample"] == high_sample]
+        result = row_high[signal_col].values[0] / row_low[signal_col].values[0]
+        new_row = row_high.copy()
+        new_row[signal_col] = result
+        new_row["Sample"] = ratio_label
+        data = pd.concat([data, new_row], ignore_index=True)
+        data = data.loc[data["Sample"] == ratio_label]
+        data = data.rename(columns={signal_col: ratio_col})
+        all_medians.append(data)
+
+    df_ratios = pd.concat(all_medians).reset_index(drop=True)
+
+    if first_ratio_zero:
+        df_ratios.loc[0, ratio_col] = 0
+
+    if on_graph_text:
+        fig = px.line(
+            df_ratios, x="Days", y=ratio_col, markers=True,
+            text="Date_of_experiment", hover_data=["cell_count"],
+        )
+    else:
+        fig = px.line(
+            df_ratios, x="Days", y=ratio_col, markers=True,
+            hover_data=["cell_count"],
+        )
+
+    fig.update_xaxes(
+        showline=True, linewidth=2, linecolor="black", mirror=True,
+        ticks="outside", title_text="Days", tick0=1, dtick=1,
+        range=[-5, df_ratios["Days"].max() + 5],
+        tickfont_size=25, title_font_size=25,
+        tickvals=df_ratios["Days"],
+        showgrid=False,
+    )
+    fig.update_yaxes(
+        showline=True, linewidth=2, linecolor="black", mirror=True,
+        ticks="outside",
+        title_text="Fold-change",
+        tickfont_size=25, title_font_size=25,
+        showgrid=False,
+    )
+    fig.update_layout(
+        plot_bgcolor="white",
+        title=dict(
+            text=f"Ratio of {high_sample} to {low_sample} EV-uptake populations over time",
+            x=0.5, font_size=24,
+        ),
+        height=300, width=1200,
+        font=dict(family="Arial"),
+    )
+
+    textposition = [
+        "top center", "top center", "top center", "bottom center",
+        "bottom left", "top center", "top center", "bottom center",
+        "top center", "top right", "top center",
+    ]
+    fig.update_traces(
+        line=dict(color="blue", width=5), marker=dict(size=16),
+        textposition=textposition, textfont_size=14,
+    )
+
     return fig
