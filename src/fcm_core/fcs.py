@@ -293,122 +293,228 @@ def fcs_time_scatter_plot(
     )
     return fig
 
-def fcs_high_low_ratio_lineplot(
-    df: pd.DataFrame,
-    signal_col: str = "PKH26",
-    low_sample: str = "Low",
-    high_sample: str = "High",
-    exlude_sample: str = "Dye",
-    first_ratio_zero: bool = True,
-    on_graph_text: bool = False,
-) -> go.Figure:
-    """Plot the High-to-Low uptake median ratio as a line graph over time.
 
-    Computes per-experiment medians of ``signal_col`` for each sample group,
-    derives the High/Low ratio at each time point, and returns a styled
-    Plotly line figure.
+class LinePlot:
+    """Collection of Plotly line-plot visualizations for flow cytometry data.
+
+    Common axis styles and layout settings are defined once in ``__init__``
+    and reused across all plot methods.
 
     Args:
-        df: Normalized dataframe containing all events. Must have columns
-            ``Experimental_ID``, ``Sample``, ``File name``,
-            ``Date_of_experiment``, ``Days``, and ``signal_col``.
-        signal_col: Fluorescence channel column used for median computation.
-            Defaults to ``"PKH26"``.
-        low_sample: Label of the low-uptake sample group. Defaults to
-            ``"Low"``.
-        high_sample: Label of the high-uptake sample group. Defaults to
-            ``"High"``.
-        exlude_sample: Substring to exclude the unneeded samples 
-            (e.g., Dye control) from analysis.
-        first_ratio_zero: If ``True``, sets the ratio of the first time
-            point to zero (representing the initial sort). Defaults to
-            ``True``.
-        on_graph_text: If ``True``, annotates each data point with its
-            ``Date_of_experiment`` label. Defaults to ``False``.
-
-    Returns:
-        go.Figure: Plotly line figure with one point per experiment.
+        height: Default figure height in pixels.
+        width: Default figure width in pixels.
+        font_family: Font family applied to the whole figure.
+        line_color: Border color for axes.
+        line_width: Border width for axes.
+        plot_bgcolor: Background color of the plot area.
+        tick_font_size: Font size for axis tick labels.
+        title_font_size: Font size for axis titles.
     """
-    df = df.copy()
-    df["cell_count"] = 1
 
-    medians = df.groupby(
-        by=[
-            "Experimental_ID", "Sample", "File name", 
-            "Date_of_experiment", "Days"
-        ]
-    ).agg({signal_col: "median", "cell_count": "sum"}).reset_index()
-    medians.rename(columns={"cell_count": "cell_count"}, inplace=True)
-
-    medians = medians.loc[~medians["Sample"].str.contains(exlude_sample)]
-    medians.sort_values(by="Experimental_ID", inplace=True)
-
-    ratio_label = f"{high_sample}/{low_sample} ratio"
-    ratio_col = f"{signal_col}_ratio"
-
-    all_medians = []
-    for exp in medians["Experimental_ID"].unique():
-        data = medians.loc[medians["Experimental_ID"] == exp]
-        row_low = data.loc[data["Sample"] == low_sample]
-        row_high = data.loc[data["Sample"] == high_sample]
-        result = row_high[signal_col].values[0] / row_low[signal_col].values[0]
-        new_row = row_high.copy()
-        new_row[signal_col] = result
-        new_row["Sample"] = ratio_label
-        data = pd.concat([data, new_row], ignore_index=True)
-        data = data.loc[data["Sample"] == ratio_label]
-        data = data.rename(columns={signal_col: ratio_col})
-        all_medians.append(data)
-
-    df_ratios = pd.concat(all_medians).reset_index(drop=True)
-
-    if first_ratio_zero:
-        df_ratios.loc[0, ratio_col] = 0
-
-    if on_graph_text:
-        fig = px.line(
-            df_ratios, x="Days", y=ratio_col, markers=True,
-            text="Date_of_experiment", hover_data=["cell_count"],
-        )
-    else:
-        fig = px.line(
-            df_ratios, x="Days", y=ratio_col, markers=True,
-            hover_data=["cell_count"],
-        )
-
-    fig.update_xaxes(
-        showline=True, linewidth=2, linecolor="black", mirror=True,
-        ticks="outside", title_text="Days", tick0=1, dtick=1,
-        range=[-5, df_ratios["Days"].max() + 5],
-        tickfont_size=25, title_font_size=25,
-        tickvals=df_ratios["Days"],
-        showgrid=False,
-    )
-    fig.update_yaxes(
-        showline=True, linewidth=2, linecolor="black", mirror=True,
-        ticks="outside",
-        title_text="Fold-change",
-        tickfont_size=25, title_font_size=25,
-        showgrid=False,
-    )
-    fig.update_layout(
+    def __init__(
+        self,
+        height=500,
+        width=1200,
+        font_family="Arial",
+        line_color="black",
+        line_width=2,
         plot_bgcolor="white",
-        title=dict(
-            text=f"Ratio of {high_sample} to {low_sample} EV-uptake populations over time",
-            x=0.5, font_size=24,
-        ),
-        height=300, width=1200,
-        font=dict(family="Arial"),
-    )
+        tick_font_size=25,
+        title_font_size=25,
+    ):
+        self.height = height
+        self.width = width
+        self.font_family = font_family
+        self.line_color = line_color
+        self.line_width = line_width
+        self.plot_bgcolor = plot_bgcolor
+        self.tick_font_size = tick_font_size
+        self.title_font_size = title_font_size
 
-    textposition = [
-        "top center", "top center", "top center", "bottom center",
-        "bottom left", "top center", "top center", "bottom center",
-        "top center", "top right", "top center",
-    ]
-    fig.update_traces(
-        line=dict(color="blue", width=5), marker=dict(size=16),
-        textposition=textposition, textfont_size=14,
-    )
+    def _compute_medians(self, df, signal_col="PKH26", exclude_sample="Dye"):
+        """Compute per-experiment, per-sample medians from raw event data.
 
-    return fig
+        Args:
+            df: Raw events dataframe. Must have columns ``Experimental_ID``,
+                ``Sample``, ``File name``, ``Date_of_experiment``, ``Days``,
+                and ``signal_col``.
+            signal_col: Fluorescence channel column to compute median on.
+                Defaults to ``"PKH26"``.
+            exclude_sample: Substring used to drop unwanted samples
+                (e.g. ``"Dye"``). Defaults to ``"Dye"``.
+
+        Returns:
+            pd.DataFrame: Aggregated medians sorted by ``Experimental_ID``,
+            with an additional ``cell_count`` column.
+        """
+        work_df = df.copy()
+        work_df["cell_count"] = 1
+
+        medians = work_df.groupby(
+            by=["Experimental_ID", "Sample", "File name",
+                "Date_of_experiment", "Days"]
+        ).agg({signal_col: "median", "cell_count": "sum"}).reset_index()
+
+        medians = medians.loc[~medians["Sample"].str.contains(exclude_sample)]
+        medians.sort_values(by="Experimental_ID", inplace=True)
+        return medians
+
+    def _apply_common_styles(self, fig, title_text):
+        """Apply shared axis borders, background, and font to a figure."""
+        fig.update_xaxes(
+            showline=True, linewidth=self.line_width, linecolor=self.line_color,
+            mirror=True, ticks="outside",
+        )
+        fig.update_yaxes(
+            showline=True, linewidth=self.line_width, linecolor=self.line_color,
+            mirror=True, ticks="outside",
+        )
+        fig.update_layout(
+            plot_bgcolor=self.plot_bgcolor,
+            title=dict(text=title_text, x=0.5, font_size=self.title_font_size),
+            height=self.height,
+            width=self.width,
+            font=dict(family=self.font_family),
+        )
+        return fig
+
+    def fcs_high_low_ratio_lineplot(
+        self,
+        df,
+        signal_col="PKH26",
+        low_sample="Low",
+        high_sample="High",
+        exclude_sample="Dye",
+        first_ratio_zero=True,
+        on_graph_text=False,
+    ):
+        """Plot the High-to-Low uptake median ratio as a line graph over time.
+
+        Computes per-experiment medians of ``signal_col`` for each sample
+        group, derives the High/Low ratio at each time point, and returns a
+        styled Plotly line figure.
+
+        Args:
+            df: Normalized dataframe. Must have columns ``Experimental_ID``,
+                ``Sample``, ``File name``, ``Date_of_experiment``, ``Days``,
+                and ``signal_col``.
+            signal_col: Fluorescence channel column for median computation.
+                Defaults to ``"PKH26"``.
+            low_sample: Label of the low-uptake sample group. Defaults to
+                ``"Low"``.
+            high_sample: Label of the high-uptake sample group. Defaults to
+                ``"High"``.
+            exclude_sample: Substring used to filter out unwanted samples
+                (e.g. ``"Dye"``). Defaults to ``"Dye"``.
+            first_ratio_zero: If ``True``, sets the first time-point ratio
+                to zero (representing the initial sort). Defaults to ``True``.
+            on_graph_text: If ``True``, annotates each point with its
+                ``Date_of_experiment`` label. Defaults to ``False``.
+
+        Returns:
+            go.Figure: Plotly line figure with one point per experiment.
+        """
+        medians = self._compute_medians(df, signal_col=signal_col, exclude_sample=exclude_sample)
+
+        ratio_label = f"{high_sample}/{low_sample} ratio"
+        ratio_col = f"{signal_col}_ratio"
+
+        all_medians = []
+        for exp in medians["Experimental_ID"].unique():
+            data = medians.loc[medians["Experimental_ID"] == exp]
+            row_low = data.loc[data["Sample"] == low_sample]
+            row_high = data.loc[data["Sample"] == high_sample]
+            result = row_high[signal_col].values[0] / row_low[signal_col].values[0]
+            new_row = row_high.copy()
+            new_row[signal_col] = result
+            new_row["Sample"] = ratio_label
+            data = pd.concat([data, new_row], ignore_index=True)
+            data = data.loc[data["Sample"] == ratio_label]
+            data = data.rename(columns={signal_col: ratio_col})
+            all_medians.append(data)
+
+        df_ratios = pd.concat(all_medians).reset_index(drop=True)
+
+        if first_ratio_zero:
+            df_ratios.loc[0, ratio_col] = 0
+
+        if on_graph_text:
+            fig = px.line(
+                df_ratios, x="Days", y=ratio_col, markers=True,
+                text="Date_of_experiment", hover_data=["cell_count"],
+            )
+        else:
+            fig = px.line(
+                df_ratios, x="Days", y=ratio_col, markers=True,
+                hover_data=["cell_count"],
+            )
+
+        fig.update_xaxes(
+            title_text="Days", tick0=1, dtick=1,
+            range=[-5, df_ratios["Days"].max() + 5],
+            tickfont_size=self.tick_font_size, title_font_size=self.title_font_size,
+            tickvals=df_ratios["Days"], showgrid=False,
+        )
+        fig.update_yaxes(
+            title_text="Fold-change",
+            tickfont_size=self.tick_font_size, title_font_size=self.title_font_size,
+            showgrid=False,
+        )
+        fig.update_traces(
+            line=dict(color="blue", width=5), marker=dict(size=16),
+            textfont_size=14,
+        )
+
+        title = f"Ratio of {high_sample} to {low_sample} EV-uptake populations over time"
+        self._apply_common_styles(fig, title)
+        return fig
+
+    def fcs_signals_lineplot(
+        self,
+        df,
+        signal_col="PKH26",
+        exclude_sample="Dye",
+        x_col="Days",
+        color_map=None,
+        title="All FACS experiments over time",
+    ):
+        """Plot per-sample median signal intensity as a line graph over time.
+
+        Args:
+            df: Raw events dataframe. Must have columns ``Experimental_ID``,
+                ``Sample``, ``File name``, ``Date_of_experiment``, ``Days``,
+                and ``signal_col``.
+            signal_col: Column name for the fluorescence signal plotted on
+                the y-axis. Defaults to ``"PKH26"``.
+            exclude_sample: Substring used to drop unwanted samples
+                (e.g. ``"Dye"``). Defaults to ``"Dye"``.
+            x_col: Column name to use as the x-axis. Defaults to ``"Days"``.
+            color_map: Dict mapping sample labels to line colors, e.g.
+                ``{"Control": "black", "Low": "blue", "High": "red"}``.
+                Defaults to a preset Control/Low/High palette.
+            title: Plot title. Defaults to ``"All FACS experiments over time"``.
+
+        Returns:
+            go.Figure: Plotly line figure with one trace per sample group.
+        """
+        medians = self._compute_medians(df, signal_col=signal_col, exclude_sample=exclude_sample)
+
+        if color_map is None:
+            color_map = {"Control": "black", "Low": "blue", "High": "red"}
+
+        fig = px.line(
+            medians, x=x_col, y=signal_col, color="Sample",
+            color_discrete_map=color_map, markers=True,
+        )
+        fig.update_xaxes(
+            title_text=x_col,
+            tickvals=medians[x_col].unique(),
+            tickfont_size=self.tick_font_size, title_font_size=self.title_font_size,
+        )
+        fig.update_yaxes(
+            title_text=f"{signal_col} signal intensity",
+            tickfont_size=self.tick_font_size, title_font_size=self.title_font_size,
+        )
+
+        self._apply_common_styles(fig, title)
+        return fig
