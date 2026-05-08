@@ -10,7 +10,7 @@ def fcs_time_histogram(
     selected_df: pd.DataFrame,
     df: pd.DataFrame,
     signal_col: str = "PKH26",
-    ref_exp_id: str = "02",
+    ref_exp_id: str | None = None,
     exclude_thresh_line: list = ["01"],
 ):
     """Plot histogram distributions of signal groups over time.
@@ -30,7 +30,8 @@ def fcs_time_histogram(
         signal_col: Name of the fluorescence signal column to plot.
             Defaults to ``"PKH26"``.
         ref_exp_id: Experimental ID whose Low/High medians are used as
-            the dashed reference lines. Defaults to ``"02"``.
+            the dashed reference lines. Defaults to None. For drawing the 
+            lines, use the experiment with ID ``"02"``.
         exclude_thresh_line: List of Experimental IDs whose thresholds should 
             be excluded from the reference lines. Defaults to ``["01"]``.
 
@@ -89,8 +90,8 @@ def fcs_time_histogram(
         _hover = (
             f"Signal: %{{x:.1f}}<br>"
             f"Count: %{{y}}<br>"
-            f"Low threshold: {low_ref:.1f}<br>"
-            f"High threshold: {high_ref:.1f}"
+            # f"Low threshold: {low_ref:.1f}<br>"
+            # f"High threshold: {high_ref:.1f}"
             "<extra></extra>"
         )
         fig.add_trace(
@@ -178,23 +179,25 @@ def fcs_time_histogram(
             tickfont_size=20,
             showgrid=False,  # Disable gridlines
         )
-        if exp not in(exclude_thresh_line):
-            # The reference line for the low uptake
-            fig.add_vline(
-                x=low_ref,
-                line_dash="dash",
-                line_color="rgba(22, 69, 62, 0.5)",
-                row=i,
-                col=1,
-            )
-            # The reference line for the high uptake
-            fig.add_vline(
-                x=high_ref,
-                line_dash="dash",
-                line_color="rgba(255, 0, 0, 0.5)",
-                row=i,
-                col=1,
-            )
+
+        if ref_exp_id:
+            if exp not in(exclude_thresh_line):
+                # The reference line for the low uptake
+                fig.add_vline(
+                    x=low_ref,
+                    line_dash="dash",
+                    line_color="rgba(22, 69, 62, 0.5)",
+                    row=i,
+                    col=1,
+                )
+                # The reference line for the high uptake
+                fig.add_vline(
+                    x=high_ref,
+                    line_dash="dash",
+                    line_color="rgba(255, 0, 0, 0.5)",
+                    row=i,
+                    col=1,
+                )
 
         i += 1  # go to the next row
 
@@ -331,8 +334,8 @@ class LinePlot:
         line_color="black",
         line_width=2,
         plot_bgcolor="white",
-        tick_font_size=25,
-        title_font_size=25,
+        tick_font_size=20,
+        title_font_size=20,
     ):
         self.height = height
         self.width = width
@@ -486,6 +489,230 @@ class LinePlot:
         title = f"Ratio of {high_sample} to {low_sample} EV-uptake populations over time"
         self._apply_common_styles(fig, title)
         return fig
+    
+    def fcs_high_low_ratio_bubblechart(
+        self,
+        df,
+        signal_col="PKH26",
+        low_sample="Low",
+        high_sample="High",
+        exclude_sample="Dye",
+        first_ratio_zero=True,
+        on_graph_text=False,
+    ):
+        """Plot the High-to-Low uptake median ratio as a bubble chart over time.
+
+        Computes per-experiment medians of ``signal_col`` for each sample
+        group, derives the High/Low ratio at each time point, and returns a
+        styled Plotly bubble chart figure.
+
+        Args:
+            df: Normalized dataframe. Must have columns ``Experimental_ID``,
+                ``Sample``, ``File name``, ``Date_of_experiment``, ``Days``,
+                and ``signal_col``.
+            signal_col: Fluorescence channel column for median computation.
+                Defaults to ``"PKH26"``.
+            low_sample: Label of the low-uptake sample group. Defaults to
+                ``"Low"``.
+            high_sample: Label of the high-uptake sample group. Defaults to
+                ``"High"``.
+            exclude_sample: Substring used to filter out unwanted samples
+                (e.g. ``"Dye"``). Defaults to ``"Dye"``.
+            first_ratio_zero: If ``True``, sets the first time-point ratio
+                to zero (representing the initial sort). Defaults to ``True``.
+            on_graph_text: If ``True``, annotates each point with its
+                ``Date_of_experiment`` label. Defaults to ``False``.
+
+        Returns:
+            go.Figure: Plotly bubble chart figure with one bubble per experiment.
+        """
+        medians = self._compute_medians(
+            df, signal_col=signal_col, exclude_sample=exclude_sample
+        )
+
+        ratio_label = f"{high_sample}/{low_sample} ratio"
+        ratio_col = f"{signal_col}_ratio"
+
+        all_medians = []
+        for exp in medians["Experimental_ID"].unique():
+            data = medians.loc[medians["Experimental_ID"] == exp]
+            row_low = data.loc[data["Sample"] == low_sample]
+            row_high = data.loc[data["Sample"] == high_sample]
+            result = row_high[
+                signal_col
+            ].values[0] / row_low[signal_col].values[0]
+            new_row = row_high.copy()
+            new_row[signal_col] = result
+            new_row["Sample"] = ratio_label
+            data = pd.concat([data, new_row], ignore_index=True)
+            data = data.loc[data["Sample"] == ratio_label]
+            data = data.rename(columns={signal_col: ratio_col})
+            all_medians.append(data)
+
+        df_ratios = pd.concat(all_medians).reset_index(drop=True)
+
+        if first_ratio_zero:
+            df_ratios.loc[0, ratio_col] = 0
+
+        if on_graph_text:
+            fig = px.scatter(
+                df_ratios, x="Days", y=ratio_col,
+                size="cell_count", text="Date_of_experiment",
+                hover_data=["cell_count"],
+            )
+        else:
+            fig = px.scatter(
+                df_ratios, x="Days", y=ratio_col,
+                size="cell_count",
+                hover_data=["cell_count"],
+            )
+
+        fig.update_xaxes(
+            title_text="Days", tick0=1, dtick=1,
+            range=[-5, df_ratios["Days"].max() + 5],
+            tickfont_size=self.tick_font_size, 
+            title_font_size=self.title_font_size,
+            tickvals=df_ratios["Days"], showgrid=False,
+        )
+        fig.update_yaxes(
+            title_text="Fold-change",
+            tickfont_size=self.tick_font_size, 
+            title_font_size=self.title_font_size,
+            showgrid=False,
+        )
+        fig.update_traces(
+            marker=dict(color="darkblue", opacity=0.85),
+            textfont_size=14,
+        )
+
+        title = f"Ratio of {high_sample} to {low_sample} EV-uptake populations over time"
+        self._apply_common_styles(fig, title)
+        return fig
+
+
+    
+    def fcs_high_low_ratio_stepchart(
+        self,
+        df,
+        signal_col="PKH26",
+        low_sample="Low",
+        high_sample="High",
+        exclude_sample="Dye",
+        first_ratio_zero=True,
+        on_graph_text=False,
+    ):
+        """Plot the High-to-Low uptake median ratio as a step area chart over time.
+
+        Computes per-experiment medians of ``signal_col`` for each sample
+        group, derives the High/Low ratio at each time point, and returns a
+        styled Plotly step area figure.
+
+        Args:
+            df: Normalized dataframe. Must have columns ``Experimental_ID``,
+                ``Sample``, ``File name``, ``Date_of_experiment``, ``Days``,
+                and ``signal_col``.
+            signal_col: Fluorescence channel column for median computation.
+                Defaults to ``"PKH26"``.
+            low_sample: Label of the low-uptake sample group. Defaults to
+                ``"Low"``.
+            high_sample: Label of the high-uptake sample group. Defaults to
+                ``"High"``.
+            exclude_sample: Substring used to filter out unwanted samples
+                (e.g. ``"Dye"``). Defaults to ``"Dye"``.
+            first_ratio_zero: If ``True``, sets the first time-point ratio
+                to zero (representing the initial sort). Defaults to ``True``.
+            on_graph_text: If ``True``, annotates each point with its
+                ``Date_of_experiment`` label. Defaults to ``False``.
+
+        Returns:
+            go.Figure: Plotly step area figure with one point per experiment.
+        """
+        medians = self._compute_medians(
+            df, signal_col=signal_col, exclude_sample=exclude_sample
+        )
+
+        ratio_label = f"{high_sample}/{low_sample} ratio"
+        ratio_col = f"{signal_col}_ratio"
+
+        all_medians = []
+        for exp in medians["Experimental_ID"].unique():
+            data = medians.loc[medians["Experimental_ID"] == exp]
+            row_low = data.loc[data["Sample"] == low_sample]
+            row_high = data.loc[data["Sample"] == high_sample]
+            result = row_high[
+                signal_col
+            ].values[0] / row_low[signal_col].values[0]
+            new_row = row_high.copy()
+            new_row[signal_col] = result
+            new_row["Sample"] = ratio_label
+            data = pd.concat([data, new_row], ignore_index=True)
+            data = data.loc[data["Sample"] == ratio_label]
+            data = data.rename(columns={signal_col: ratio_col})
+            all_medians.append(data)
+
+        df_ratios = pd.concat(all_medians).reset_index(drop=True)
+
+        # If we want the end of the line of the steps touch the x-axis, we 
+        # need to add a point with y=0 at the end of final data. Then, it will
+        # have the same date but with value 0 for fold-change. 
+
+        # Get the last x value (last day) from the dataframe
+        last_day = df_ratios["Days"].max()
+        # Create a new row with y=0 at the last x value
+        new_row = df_ratios.iloc[[-1]].copy()
+        new_row[ratio_col] = 0
+        # keep last_day to end the line at the same x
+        new_row["Days"] = last_day  
+
+        # Append the new row to the dataframe
+        df_ratios = pd.concat([df_ratios, new_row], ignore_index=True)
+
+
+        if first_ratio_zero:
+            df_ratios.loc[0, ratio_col] = 0
+
+        if on_graph_text:
+            fig = px.line(
+                df_ratios, x="Days", y=ratio_col, markers=False,
+                text="Date_of_experiment", hover_data=["cell_count"],
+                line_shape="hv",
+            )
+        else:
+            fig = px.line(
+                df_ratios, x="Days", y=ratio_col, markers=False,
+                hover_data=["cell_count"],
+                line_shape="hv",
+            )
+
+        fig.update_xaxes(
+            title_text="Days", tick0=1, dtick=1,
+            range=[-5, df_ratios["Days"].max() + 5],
+            tickfont_size=self.tick_font_size,
+            title_font_size=self.title_font_size,
+            tickvals=df_ratios["Days"], showgrid=False,
+            tickfont_color="black",
+            title_font_color="black",
+        )
+        fig.update_yaxes(
+            title_text="Fold-change",
+            tickfont_size=self.tick_font_size,
+            title_font_size=self.title_font_size,
+            showgrid=False,
+            tickfont_color="black",
+            title_font_color="black",
+        )
+        fig.update_traces(
+            line=dict(color="darkblue", width=5),
+            fill="tozeroy",
+            fillcolor="rgba(0, 0, 139, 0.2)",
+            textfont_size=14,
+        )
+
+        title = f"Ratio of {high_sample} to {low_sample} EV-uptake populations over time"
+        fig.update_layout(title_font_color="black")
+        self._apply_common_styles(fig, title)
+        return fig
+    
 
     def fcs_signals_lineplot(
         self,
